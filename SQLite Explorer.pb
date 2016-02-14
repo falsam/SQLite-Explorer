@@ -1,7 +1,9 @@
-;SQLite Explorer (falsam)
+; SQLite Explorer (falsam)
 ;
-;PB 4.31
+; PB PB 4.40
 ;
+; Create  : 2015 Octobre 11
+; Update  : 2016 Février 14
 
 EnableExplicit
 
@@ -10,11 +12,13 @@ Enumeration Font
 EndEnumeration
 
 Enumeration Window
-  #MainForm
+  #MainForm                      ;Fenetre principale
+  #RecordForm                    ;Insertion ou modification d'un enregistrement
 EndEnumeration
 
-Enumeration gadget
+Enumeration Gadget
   #DatabaseSelect                ;Selecteur de base de données
+  #UseUnescapeString             
   #DataBase                      ;Base de données en cours de visualisation
   #ReqSql                        ;Saisie des requêtes SQL
   #ListTables                    ;Liste des tables 
@@ -24,6 +28,13 @@ Enumeration gadget
   #Splitter1
   #Splitter2
   #Splitter3
+  
+  #RFContainer
+  #RFSubmit                      ;Ajouter ou modifier un enregistrement (Bouton)
+EndEnumeration
+
+Enumeration GadgetViewRecord #PB_Compiler_EnumerationValue 
+  #Field
 EndEnumeration
 
 Enumeration ShortCut
@@ -32,6 +43,7 @@ Enumeration ShortCut
   #End                           ;Derniere requete SQL (Ctrl + End)
   #PageUp                        ;Requete SQL précédente
   #PageDown                      ;Requete SQL suivante
+  #Enter                         ;Modifier un rangée de données 
 EndEnumeration
 
 Structure NewReqSql
@@ -50,6 +62,8 @@ Declare WorkReqSqlSave()        ;Sauvegarde des requêtes SQL associées à la b
 Declare OnDataBaseSelect()      ;Une base de données est sélectionnée
 Declare DataBaseListTable()     ;Affichage des tables de la base de données 
 Declare OnTableSelect()         ;Une table est sélectionnée 
+
+Declare OnRecordSelect()        ;
 
 Declare OnReqSQLExe()           ;Une requête SQL est éxécutée
 Declare OnReqSQLSelect()        ;Défilement & Selection d'une requête SQL
@@ -73,6 +87,8 @@ Procedure MainFormShow()
     ButtonGadget(#DatabaseSelect, 410, 10, 22, 22, "?")
     GadgetToolTip(#DatabaseSelect, "Selectionner une base de données")
     
+    CheckBoxGadget(#UseUnescapeString, 460, 10, 150, 22, "Use UnescapeString")    
+    
     ;Base de donnée en cours de consultation
     TextGadget(#PB_Any, 10, 15, 100, 20, "Database")
     StringGadget(#Database, 105, 10, 300, 22, "?", #PB_String_ReadOnly)
@@ -84,7 +100,7 @@ Procedure MainFormShow()
     TreeGadget(#ListTables, 0, 0, 0, 0)
     
     ;Affichage du contenu d'une table sélectionneé dans #ListTables (Droite de la fenetre)
-    ListIconGadget(#ListRows, 0, 0, 0, 0, "?", 1000, #PB_ListIcon_FullRowSelect|#PB_ListIcon_GridLines|#PB_ListIcon_HeaderDragDrop)
+    ListIconGadget(#ListRows, 0, 0, 0, 0, "?", 1000, #PB_ListIcon_FullRowSelect|#PB_ListIcon_GridLines|#PB_ListIcon_HeaderDragDrop|#PB_ListIcon_AlwaysShowSelection)
     
     ;Debug (Bas de la fenetre)
     ListViewGadget(#Report, 0, 0, 0, 0)
@@ -108,6 +124,7 @@ Procedure MainFormShow()
     AddKeyboardShortcut(#MainForm, #PB_Shortcut_Control|#PB_Shortcut_End, #End)     ;Derniere requete SQL
     AddKeyboardShortcut(#MainForm, #PB_Shortcut_PageDown, #PageDown)                ;Requete SQL précédente
     AddKeyboardShortcut(#MainForm, #PB_Shortcut_PageUp, #PageUp)                    ;Requete SQL suivante
+    AddKeyboardShortcut(#MainForm, #PB_Shortcut_Return, #Enter)                     ;Un enregistrement est sélectionné
     
     ;Evenements
     BindGadgetEvent(#DatabaseSelect, @OnDataBaseSelect(), #PB_EventType_LeftClick)  ;Une base de donnés est sélectionnée
@@ -118,12 +135,50 @@ Procedure MainFormShow()
     BindEvent(#PB_Event_Menu, @OnReqSQLSelect(), #MainForm, #PageUp)                ;Sélection de la requete SQL précédente
     BindEvent(#PB_Event_Menu, @OnReqSQLSelect(), #MainForm, #PageDown)              ;Sélection de la requete SQL suivante
     
+    BindEvent(#PB_Event_Menu, @OnRecordSelect(), #MainForm, #Enter)                 ;Un enregistrement est sélectionné 
+    
     BindEvent(#PB_Event_SizeWindow, @OnResizeWindow())                              ;Redimensionne la fenêtre
     BindEvent(#PB_Event_CloseWindow, @OnCloseWindow())                              ;Fermeture de l'application   
     
     Repeat : Until WaitWindowEvent(10) = #PB_Event_CloseWindow
   EndIf
 EndProcedure
+
+
+Procedure RecordShow()
+  Protected Col, y, Spaced = 10
+  Protected Index = GetGadgetState(#ListRows)
+  
+  OpenWindow(#RecordForm, 0, 0, 500, 400, "", #PB_Window_ScreenCentered|#PB_Window_SizeGadget|#PB_Window_MaximizeGadget)
+  SetWindowColor(#RecordForm, RGB(255, 255, 255))
+  
+  ;Container
+  ScrollAreaGadget(#RFContainer, 0, 0, 500, 350, 450, 2000, 10, #PB_ScrollArea_Flat)
+  
+  While GetGadgetItemAttribute(#ListRows, 0,  #PB_ListIcon_ColumnWidth, Col)  
+    TextGadget(#PB_Any, 10, (y * 50) + Spaced , 150, 22, GetGadgetItemText(#ListRows, -1, Col))
+    EditorGadget(#Field + Col, 160, (y * 50) + Spaced, 290, 42)
+    SetGadgetItemText(#Field + Col, 0, GetGadgetItemText(#ListRows, Index, Col))
+    Col+1 : y + 1
+  Wend
+  
+  ;Fermeture du container
+  CloseGadgetList()
+  
+  ;Le nombre de gadgets de cette fenêtre est mémorisé en data du gadget #Field
+  SetGadgetData(#Field, Col)
+  
+  ;La rangée de la table de visualisation est mémorisée en data du gadget container
+  SetGadgetData(#RFContainer, Index)
+  
+  ;Le numéro d'enregistrement de la table est mémorisée en date de la fenetre
+  SetWindowData(#RecordForm, Col)
+  
+  WindowBounds(#RecordForm, 400, 200, #PB_Ignore, #PB_Ignore)
+  StickyWindow(#RecordForm, #True)
+  
+EndProcedure
+
 
 ;Affichage du rapport d'éxécution
 Procedure ShowReport(Buffer.s)
@@ -256,7 +311,7 @@ Procedure OnTableSelect()
       Table = GetGadgetItemText(#ListTables, GetGadgetState(#ListTables))
       
       ;Création de la requéte
-      ReqSql = "select * from " + Table + " limit 1, 100"
+      ReqSql = "select * from " + Table + " limit 0, 100"
       SetGadgetText(#ReqSql, ReqSql)
     EndIf
   EndIf 
@@ -296,7 +351,11 @@ Procedure OnReqSQLExe()
         For i = 0 To DatabaseColumns(#DataBase) - 1
           Buffer + GetDatabaseString(#DataBase, i) + Chr(10)
         Next
-        AddGadgetItem(#ListRows, -1, Buffer)
+        If GetGadgetState(#UseUnescapeString) = #True
+          AddGadgetItem(#ListRows, -1, UnescapeString(Buffer, #PB_String_EscapeXML))
+        Else
+          AddGadgetItem(#ListRows, -1, Buffer)
+        EndIf
         Buffer = ""
       Wend
       
@@ -341,17 +400,50 @@ Procedure OnReqSQLError(ReqSql.s)
   ShowReport(DatabaseError())
 EndProcedure
 
-;Redimensionne la fenetre principale
-Procedure OnResizeWindow()
-  Protected Width = WindowWidth(#MainForm)
-  Protected Height = WindowHeight(#MainForm) 
+;-
+;- U.T - Record
+;Modification d'une rangée de données 
+Procedure OnRecordSelect()
+  Protected Index = GetGadgetState(#ListRows)
   
-  ResizeGadget(#Splitter3, #PB_Ignore, #PB_Ignore, Width-20, Height-70)
-  ResizeGadget(#Help, #PB_Ignore, Height - 25, Width-20, #PB_Ignore)
+  If Index <> -1
+    RecordShow()
+  EndIf
+EndProcedure
+
+
+;Redimensionne la fenetre active
+Procedure OnResizeWindow()
+  Protected Window = EventWindow()
+  Protected Width = WindowWidth(Window)
+  Protected Height = WindowHeight(Window) 
+  Protected Gadget
+  
+  Select Window
+    Case #MainForm
+      ResizeGadget(#Splitter3, #PB_Ignore, #PB_Ignore, Width-20, Height-70)
+      ResizeGadget(#Help, #PB_Ignore, Height - 25, Width-20, #PB_Ignore)
+      
+    Case #RecordForm
+      ResizeGadget(#RFContainer, #PB_Ignore, #PB_Ignore, Width, Height - 50)
+      SetGadgetAttribute(#RFContainer, #PB_ScrollArea_InnerWidth, Width - 50)
+      For Gadget = #Field To #Field + GetGadgetData(#Field) - 1
+          ResizeGadget(Gadget, #PB_Ignore, #PB_Ignore, Width - GadgetX(Gadget) - 50, #PB_Ignore)
+      Next
+    
+  EndSelect
 EndProcedure
 
 ;Fermeture de l'application
 Procedure OnCloseWindow()   
-  WorkReqSqlSave()
-  End
+  Protected Window = EventWindow()
+  
+  Select Window
+    Case #RecordForm
+      CloseWindow(#RecordForm)
+      
+    Case #MainForm
+      WorkReqSqlSave()
+      End
+  EndSelect 
 EndProcedure
